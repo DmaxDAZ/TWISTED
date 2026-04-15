@@ -596,7 +596,7 @@ local function createStormUI(storm)
     if StormUI[storm] then return end 
 
     local paragraph = Tabs.Status:CreateParagraph(storm.Name, {
-        Title = "⚡ [ " .. storm.Name .. " ] ⚡ - Status",
+        Title = "⚡ [ -" .. storm.Name .. "- ] ⚡ - Status",
         Content = "⚡ Loading...",
         TitleAlignment = "Middle",
         ContentAlignment = Enum.TextXAlignment.Center
@@ -791,7 +791,7 @@ probee:OnChanged(function(bool)
     end
 end)
 
-local Truck = Tabs.Jpass:CreateToggle("truck", {Title = "Toggle Auto Truck Job Farm", Default = false })
+local Truck = Tabs.Jpass:CreateToggle("truck", {Title = "Toggle auto truck job", Default = false })
 
 Truck:OnChanged(function(bool)
 
@@ -801,7 +801,6 @@ Truck:OnChanged(function(bool)
         T_TJob = bool
         StartTrucking()
     else
-        Options.truck:SetValue(false)
         Library:Notify{
             Title = "Info [ Script ]",
             Content = "You might not have this gamepass yet, Please buy and try again later.",
@@ -809,7 +808,7 @@ Truck:OnChanged(function(bool)
         }
     end
 
-    if not bool then
+    if not bool and HasGamepass(player, 1012168885) then
         CancelLinear()
         StopTrucking()
     end
