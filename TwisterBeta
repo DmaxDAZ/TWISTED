@@ -10,8 +10,9 @@ local rbxasset = "rbxassetid://"
 
 local player = game:GetService("Players").LocalPlayer
 local char = player.Character or player.CharacterAdded
-local root = char:WaitForChild("HumanoidRootPart")
-local humanoid = char:WaitForChild("Humanoid")
+local root = char:WaitForChild("HumanoidRootPart", 2)
+local humanoid = char:WaitForChild("Humanoid", 2)
+local Camera = workspace.CurrentCamera
 
 local job_id = nil
 local Select = nil
@@ -21,6 +22,7 @@ local StormUI = {}
 local Cancel = false
 local PlaceToTween = nil
 local currentConn = nil
+local driving = false
 local DDD = 10
 local YYY = 35
 local DDDE = 30
@@ -32,10 +34,41 @@ local T_TJob = false
 local J_TruckCF = CFrame.new(0,0,0)
 
 local TruckLoopThread = nil
+local lastConn
 local ToDo = "Idle"
 local Last = nil
 local AntiflingConn
 local holding = false
+
+local function updateCharacter(newChar)
+    char = newChar
+    root = newChar:WaitForChild("HumanoidRootPart", 2)
+    humanoid = newChar:WaitForChild("Humanoid", 2)
+
+    pcall(function()
+        sethiddenproperty(player, "SimulationRadius", math.huge)
+    end)
+end
+
+if player.Character then
+    updateCharacter(player.Character)
+
+    pcall(function()
+        sethiddenproperty(player, "SimulationRadius", math.huge)
+    end)
+end
+
+player.CharacterAdded:Connect(function(char)
+    updateCharacter(char)
+
+    ToDo = "Idle"
+    driving = false
+    holding = false
+    Last = nil
+
+    if lastConn then lastConn:Disconnect() lastConn = nil end
+    if AntiflingConn then AntiflingConn:Disconnect() AntiflingConn = nil end
+end)
 
 local Zones = {
     ["Prior Lake"] = CFrame.new(528.200195, 20.9500198, 4986.65039),
@@ -144,7 +177,7 @@ local function GetTruckJobPrompt()
     for _, grid in ipairs(gridDamage:GetChildren()) do
         if grid:IsA("Folder") or grid:IsA("Model") then
 
-            local trucking = grid:FindFirstChild("Trucking Warehouse") or grid:FindFirstChild("Trucking Grain")
+            local trucking = grid:FindFirstChild("Trucking Warehouse") or grid:FindFirstChild("Trucking Grain") or grid:FindFirstChild("Trucking Logging")
             if trucking then
                 local job = trucking:FindFirstChild("job")
 
@@ -193,27 +226,38 @@ end
 
 local function GetBestOfferTruck()
     local bestButton = nil
-    local bestValue = -math.huge
+    local bestValue = -1
+    
+    local startTime = tick()
+    local searchDuration = 2
 
-    local gui = player.PlayerGui:FindFirstChild("TruckingOffers")
-    if not gui then return nil end
+    repeat task.wait()
+        local gui = player.PlayerGui:FindFirstChild("TruckingOffers")
+        if gui and gui:FindFirstChild("jobs") then
+            local scroll = gui.jobs.main.scroll
+            local offers = scroll:GetChildren()
 
-    for _, v in ipairs(gui.jobs.main.scroll:GetChildren()) do
-        if v:IsA("ImageButton") then
-            local details = v:FindFirstChild("details")
-            if details then
-                local profit = details:FindFirstChild("profit")
-                if profit and profit.Text then
-                    local value = parseNumber(profit.Text)
-
-                    if value > bestValue then
-                        bestValue = value
-                        bestButton = v
+            for _, v in ipairs(offers) do
+                if v:IsA("ImageButton") and v.Visible then
+                    local profitLabel = v:FindFirstChild("profit", true)
+                    
+                    if profitLabel and profitLabel.Text ~= "" then
+                        local value = parseNumber(profitLabel.Text)
+                        
+                        if value > bestValue then
+                            bestValue = value
+                            bestButton = v
+                        end
                     end
                 end
             end
         end
-    end
+
+        if bestValue == -1 then 
+            task.wait(0.2) 
+        end
+        
+    until bestValue > 0 or (tick() - startTime) > searchDuration
 
     return bestButton, bestValue
 end
@@ -296,20 +340,49 @@ local function StopTrucking()
         AntiflingConn:Disconnect()
         AntiflingConn = nil
     end
+    if lastConn then
+        lastConn:Disconnect()
+        lastConn = nil
+    end
     ToDo = "Idle"
     if holding then
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
         holding = false
     end
+    if player.PlayerGui:FindFirstChild("TripDetails") then
+        local cancel = player.PlayerGui:WaitForChild("details"):WaitForChild("interaction"):FindFirstChild("cancel")
+        if cancel then
+            CleverClick(cancel, false)
+        end
+    end
 end
 
 local function StartTrucking()
-    StopTrucking()
-
     TruckLoopThread = task.spawn(function()
         while true do 
             task.wait()
-                if not root or not root.Parent then continue end
+
+                if lastConn then
+                    lastConn:Disconnect()
+                    lastConn = nil
+                end
+
+                if humanoid.Health == 0 then
+                    local respawngui = player.PlayerGui:FindFirstChild("RespawnGUI")
+                    if respawngui then
+                        local respawn = respawngui:FindFirstChild("respawn"):FindFirstChild("button")
+                        if respawn then
+                            CleverClick(respawn, false)
+                        end
+                    end
+                end
+
+                if not char or not char.Parent then continue end
+                if not humanoid or humanoid.Health <= 0 then continue end
+                if not root then continue end
+
+                local cameraPos = root.Position + Vector3.new(0, 100, 0)
+                Camera.CFrame = CFrame.lookAt(cameraPos, root.Position)
         
                 local name, cf, dist = GetNearestZone()
                 
@@ -332,6 +405,10 @@ local function StartTrucking()
         
                 if ToDo == "GettingTask" then
                     local prompt = GetTruckJobPrompt()
+
+                    if not prompt then
+                        ToDo = "Idle"
+                    end
         
                     if prompt and not player.PlayerGui:FindFirstChild("TruckingOffers") then
                         repeat
@@ -339,13 +416,13 @@ local function StartTrucking()
                         warn(prompt:GetFullName())
                         task.wait()
                         until player.PlayerGui:FindFirstChild("TruckingOffers")
-                        task.wait(0.5)
+                        task.wait(1)
         
                         local best = GetBestOfferTruck()
                         if best and player.PlayerGui:FindFirstChild("TruckingOffers") and not player.PlayerGui:FindFirstChild("TripDetails") then
                             repeat
                             CleverClick(best)
-                            task.wait()
+                            task.wait(0.25)
                             until player.PlayerGui:FindFirstChild("TripDetails")
                             ToDo = "WaitingForCar"
                         end
@@ -363,7 +440,7 @@ local function StartTrucking()
                     end
         
                     if humanoid.Sit then
-                        task.wait(0.35)
+                        task.wait(0.25)
                         ToDo = "TeleportUp"
                     end
                 end
@@ -386,7 +463,9 @@ local function StartTrucking()
         
                     if target and primary then
                         ToDo = "Driving"
-                        task.spawn(function ()
+                        if driving then continue end
+                        driving = true
+                        task.spawn(function()
                             AntiflingConn = RunService.Heartbeat:Connect(function()
                                 car:WaitForChild("_trailer").PrimaryPart.CFrame = primary.CFrame
                                 car:WaitForChild("_trailer").PrimaryPart.Velocity = Vector3.zero
@@ -403,13 +482,29 @@ local function StartTrucking()
                                 end)
                             end)
                         end)
-                        Linear(primary, target.CFrame * CFrame.new(0, 45, 0), 80, function()
+                        Linear(primary, target.CFrame * CFrame.new(0, 525, 0), 90, function()
+                            Linear(primary, target.CFrame * CFrame.new(0, 0, 0), 550, function()
                             if AntiflingConn then
                             AntiflingConn:Disconnect()
                             AntiflingConn = nil
                             end
+                            end)
+
                             car:WaitForChild("_trailer").PrimaryPart.CFrame = primary.CFrame
                             car:WaitForChild("_trailer").PrimaryPart.Velocity = Vector3.zero
+
+                            task.spawn(function()
+                                for _, v in ipairs(car:WaitForChild("wheels"):GetChildren()) do
+                                    if v:IsA("Model") then
+                                        if v.PrimaryPart then
+                                            v.PrimaryPart.CFrame = primary.CFrame
+                                            v.PrimaryPart.Velocity = Vector3.zero
+                                        end
+                                    end
+                                end
+                            end)
+
+                            driving = false
                             Last = target
                             ToDo = "Finishing"
                         end)
@@ -423,12 +518,27 @@ local function StartTrucking()
         
                     if promptGui then
                         task.spawn(function()
-                        repeat
-                        primary.CFrame = Last.CFrame * CFrame.new(0, 0, 0)
-                        car:WaitForChild("_trailer").PrimaryPart.Velocity = Vector3.zero
-                        car:WaitForChild("_trailer").PrimaryPart.CFrame = primary.CFrame * CFrame.new(0,-4, -5)
-                        task.wait()
-                        until not workspace.player_related.cars:FindFirstChild(player.UserId)
+                            if not lastConn then
+                            lastConn = RunService.Heartbeat:Connect(function()
+                                if not car.Parent or not primary.Parent then 
+                                    if lastConn then lastConn:Disconnect() end
+                                    return 
+                                end
+                                
+                                if not Last then return end
+                                primary.Velocity = Vector3.zero
+                                Linear(primary, Last.CFrame * CFrame.new(0, 0, 0), 550, function ()
+                                    primary.Velocity = Vector3.zero
+                                    primary.CFrame = Last.CFrame * CFrame.new(0, 0, 0)
+                                end)
+                                
+                                local trailer = car:FindFirstChild("_trailer")
+                                if trailer and trailer.PrimaryPart then
+                                    trailer.PrimaryPart.Velocity = Vector3.zero
+                                    trailer.PrimaryPart.CFrame = primary.CFrame * CFrame.new(0,-4, -5)
+                                end
+                            end)
+                        end
                         end)
         
                         local key = promptGui:WaitForChild("main"):FindFirstChild("keybind")
@@ -445,10 +555,18 @@ local function StartTrucking()
         
                     if not workspace.player_related.cars:FindFirstChild(player.UserId) then
                         ToDo = "Idle"
+                        if lastConn then
+                            lastConn:Disconnect()
+                            lastConn = nil
+                        end
+
+                        if AntiflingConn then
+                            AntiflingConn:Disconnect()
+                            AntiflingConn = nil
+                        end
                     end
                 end
             if not T_TJob then 
-                StopTrucking() 
                 break 
             end
         end
@@ -518,25 +636,6 @@ local function collectProbe(prompt)
         task.wait(0.5)
     end
 end
-
-local function updateCharacter(newChar)
-    char = newChar
-    root = newChar:WaitForChild("HumanoidRootPart")
-
-    pcall(function()
-        sethiddenproperty(player, "SimulationRadius", math.huge)
-    end)
-end
-
-if player.Character then
-    updateCharacter(player.Character)
-
-    pcall(function()
-        sethiddenproperty(player, "SimulationRadius", math.huge)
-    end)
-end
-
-player.CharacterAdded:Connect(updateCharacter)
 
 local Library = loadstring(game:HttpGetAsync("https://github.com/ActualMasterOogway/Fluent-Renewed/releases/latest/download/Fluent.luau"))()
 local SaveManager = loadstring(game:HttpGetAsync("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/SaveManager.luau"))()
@@ -991,7 +1090,7 @@ local Tweening = false
 local loopCon
 local currentTier = -1
 
-local DDDR = Tabs.Esp:CreateToggle("DDDR", {Title = "Toggle Esp Tornado's Direction [ Broken ]", Default = false })
+--[[local DDDR = Tabs.Esp:CreateToggle("DDDR", {Title = "Toggle Esp Tornado's Direction [ Broken ]", Default = false })
 
 DDDR:OnChanged(function(bool)
     Options.DDDR:SetValue(false)
@@ -1097,7 +1196,7 @@ DDDR:OnChanged(function(bool)
         currentTier = -1
         Tweening = false
     end
-end)
+end)]]
 
 local fullBright = false
 
@@ -1315,15 +1414,10 @@ RunService.RenderStepped:Connect(function()
                 data[10] = "Tornado Wind Field: " .. string.format("%.3f", storm.configs.tornado.windfield.Value)
                 data[11] = "Tornado SFC Width: " .. string.format("%.1f", storm.configs.tornado.width:GetAttribute("sfc"))
                 data[12] = "Distance Tornado Between Player: " .. string.format("%.1f", dist)
+                data[13] = "Tornado EF: " .. getWindTier(storm.configs.tornado.winds.Value)
             else
                 data[5] = "Have Tornado: 🔴"
-                data[6] = "There is no tornado yet."
-                data[7] = "There is no tornado yet."
-                data[8] = "There is no tornado yet."
-                data[9] = "There is no tornado yet."
-                data[10] = "There is no tornado yet."
-                data[11] = "There is no tornado yet."
-                data[12] = "There is no tornado yet."
+                data[6] = "nil"
             end
 
             ui:SetValue(table.concat(data, "\n"))
