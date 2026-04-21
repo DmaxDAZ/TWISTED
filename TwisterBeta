@@ -1,3 +1,5 @@
+if not game.PlaceId == "14170731342" then return end
+
 local RunService = game:GetService("RunService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local GuiService = game:GetService("GuiService")
@@ -5,6 +7,7 @@ local Lightning = game:GetService("Lighting")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local TeleportService = game:GetService("TeleportService")
 local TweenService = game:GetService("TweenService")
+local Terrain = workspace:FindFirstChildOfClass("Terrain")
 local stormsFolder = workspace:WaitForChild("storm_related"):WaitForChild("storms")
 local rbxasset = "rbxassetid://"
 
@@ -13,37 +16,52 @@ local char = player.Character or player.CharacterAdded
 local root = char:WaitForChild("HumanoidRootPart", 2)
 local humanoid = char:WaitForChild("Humanoid", 2)
 local Camera = workspace.CurrentCamera
+local min, max = player.CameraMinZoomDistance, player.CameraMaxZoomDistance
 
 local job_id = nil
 local Select = nil
 local selectedPlayer = nil
 local probeHolding = false
 local StormUI = {}
+local PlayerUI = {}
 local Cancel = false
 local PlaceToTween = nil
 local currentConn = nil
 local driving = false
+
 local DDD = 10
 local YYY = 35
 local DDDE = 30
 local YYYE = 50
 local Esp_D_S = 15
 
+local AutoRj = true
+local lowGraphicsEnabled = false
+
 local T_Jzone = nil
 local T_TJob = false
 local J_TruckCF = CFrame.new(0,0,0)
 
+local T_NWSJob = false
+local T_SCHASERJob = false
+local T_EMERJOB = false
+
+local VisitedZones = {}
 local TruckLoopThread = nil
 local lastConn
 local ToDo = "Idle"
 local Last = nil
 local AntiflingConn
+local agaConn
 local holding = false
 
 local function updateCharacter(newChar)
     char = newChar
     root = newChar:WaitForChild("HumanoidRootPart", 2)
     humanoid = newChar:WaitForChild("Humanoid", 2)
+
+    local cameraPos = root.Position + Vector3.new(0, 100, 0)
+    Camera.CFrame = CFrame.lookAt(cameraPos, root.Position)
 
     pcall(function()
         sethiddenproperty(player, "SimulationRadius", math.huge)
@@ -80,6 +98,9 @@ local Zones = {
     ["Hazelton"] = CFrame.new(3447.70068, 46.9498634, -12447.9297),
     ["Waubun"] = CFrame.new(-11180.0928, 20.9500046, -19003.8516),
     ["Syre & Peshtigo"] = CFrame.new(15705.3506, 20.9499969, 19963.5078),
+    ["Hibbing"] = CFrame.new(-10469.7998, 20.9500084, 2402.30078),
+    ["Keysota Lake"] = CFrame.new(-12863.0049, 20.9099922, 13652.3057),
+    ["Viroqua"] = CFrame.new(10228.457, 20.9187775, 10813.748),
 }
 
 local tierColors = {
@@ -95,22 +116,114 @@ pcall(function()
     sethiddenproperty(player, "SimulationRadius", math.huge)
 end)
 
+GuiService.ErrorMessageChanged:Connect(function()
+    warn("LOLLL")
+    if AutoRj then
+        if player then
+            task.wait()
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
+        end
+    else
+        warn("Player Disabled Auto Rejoin. :(")
+    end
+end)
+
+function RunLowGraphics()
+    lowGraphicsEnabled = true
+
+    Lightning.GlobalShadows = false
+    Lightning.EnvironmentDiffuseScale = 0
+    Lightning.EnvironmentSpecularScale = 0
+    Lightning.Brightness = 1
+
+    for _, effect in ipairs(Lightning:GetChildren()) do
+        if effect:IsA("PostEffect") then
+            effect.Enabled = false
+        end
+    end
+
+    task.wait(1)
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SurfaceAppearance") then
+            obj:Destroy()
+        elseif obj:IsA("Beam") or obj:IsA("Trail") then
+            obj:Destroy()
+        end
+    end
+
+    for _, part in ipairs(workspace:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Material = Enum.Material.SmoothPlastic
+            part.Reflectance = 0
+
+            if part:IsA("MeshPart") then
+                part.TextureID = ""
+                part.Color = Color3.new(1,1,1)
+            end
+        end
+    end
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("ParticleEmitter") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+            obj.Enabled = false
+            if obj:IsA("ParticleEmitter") then
+                obj.Rate = 0
+            end
+        end
+    end
+
+    if Terrain then
+        Terrain.WaterWaveSize = 0
+        Terrain.WaterWaveSpeed = 0
+        Terrain.WaterTransparency = 1
+        Terrain.WaterReflectance = 0
+        warn("Terrain water disabled.")
+    else
+        warn("Terrain not found.")
+    end
+
+for _, obj in ipairs(workspace:GetDescendants()) do
+    if obj:IsA("Humanoid") and obj.Parent then
+        obj.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+    end
+
+    if (obj:IsA("ShirtGraphic") or obj:IsA("Shirt") or obj:IsA("Pants")) and obj.Parent then
+        obj:Destroy()
+    end
+
+    if obj:IsA("MeshPart") and obj.Parent and obj.Parent:FindFirstChild("Humanoid") then
+        obj.TextureID = ""
+    end
+end
+end
+
 local function Linear(part, target, speed, onComplete)
     if not part or not part.Parent then return end
     if part:GetAttribute("Moving") then return end
 
+    part.Velocity = Vector3.zero
     part:SetAttribute("Moving", true)
-    speed = speed or 250
 
-    local targetCF = (typeof(target) == "Instance") and target.CFrame or target
+    speed = speed or 550
+
+    local targetCF
+    
+    if typeof(target) == "Instance" then
+        targetCF = target.CFrame
+    elseif typeof(target) == "Vector3" then
+        targetCF = CFrame.new(target)
+    else
+        targetCF = target
+    end
     local startCF = part.CFrame
 
     local distance = (targetCF.Position - startCF.Position).Magnitude
     local duration = distance / speed
 
     if duration < 0.001 then
-        part.AssemblyLinearVelocity = Vector3.zero
-        part.AssemblyAngularVelocity = Vector3.zero
+
+        part.Velocity = Vector3.zero
         part.CFrame = targetCF
         part:SetAttribute("Moving", false)
         if onComplete then onComplete() end
@@ -124,8 +237,7 @@ local function Linear(part, target, speed, onComplete)
             currentConn:Disconnect()
             currentConn = nil
 
-            part.AssemblyLinearVelocity = Vector3.zero
-            part.AssemblyAngularVelocity = Vector3.zero
+            part.Velocity = Vector3.zero
             part:SetAttribute("Moving", false)
             return
         end
@@ -135,8 +247,7 @@ local function Linear(part, target, speed, onComplete)
 
         local nextCF = startCF:Lerp(targetCF, alpha)
 
-        part.AssemblyLinearVelocity = Vector3.zero
-        part.AssemblyAngularVelocity = Vector3.zero
+        part.Velocity = Vector3.zero
         part.CFrame = nextCF
 
         if alpha >= 1 then
@@ -183,8 +294,11 @@ local function GetTruckJobPrompt()
 
                 if job then
                     local hitbox = job:FindFirstChild("job_hitbox")
-                    if hitbox and (hitbox.Position - root.Position).Magnitude < 50 then
-                        return hitbox:FindFirstChildWhichIsA("ProximityPrompt")
+                    if hitbox and (hitbox.Position - root.Position).Magnitude < 25 then
+                        local prompt = hitbox:FindFirstChildWhichIsA("ProximityPrompt")
+                        if prompt then
+                            return prompt
+                        end
                     end
                 end
 
@@ -197,20 +311,26 @@ local function GetTruckJobPrompt()
 end
 
 local function GetTrailerBox()
-    local trailer = workspace.Camera
     if not root then return nil end
 
     local selectedBox = nil
     local farthestDistance = 500
 
-    for _, box in ipairs(trailer:GetChildren()) do
+    for _, box in ipairs(workspace:FindFirstChild("Camera"):GetChildren()) do
         if box:IsA("Part") and box.Name == "trailer_hitbox" then
             local dist = (box.Position - root.Position).Magnitude
 
             if dist > 500 and dist > farthestDistance then
                 farthestDistance = dist
-                selectedBox = box
+                selectedBox = box.CFrame
             end
+        end
+    end
+
+    if not selectedBox then
+        local job = player:FindFirstChild("ActiveTruckJob")
+        if job then
+            selectedBox = job.Finish:GetAttribute("ClientCF")
         end
     end
 
@@ -229,9 +349,9 @@ local function GetBestOfferTruck()
     local bestValue = -1
     
     local startTime = tick()
-    local searchDuration = 2
+    local searchDuration = 2.5
 
-    repeat task.wait()
+    repeat task.wait(0.05)
         local gui = player.PlayerGui:FindFirstChild("TruckingOffers")
         if gui and gui:FindFirstChild("jobs") then
             local scroll = gui.jobs.main.scroll
@@ -309,15 +429,24 @@ local function GetNearestZone()
     local closestCF = nil
     local closestName = nil
     local shortestDistance = math.huge
+    local foundAny = false
 
     for name, cf in pairs(Zones) do
-        local dist = (root.Position - cf.Position).Magnitude
+        if not table.find(VisitedZones, name) then
+            foundAny = true
+            local dist = (root.Position - cf.Position).Magnitude
 
-        if dist < shortestDistance and dist > 200 then
-            shortestDistance = dist
-            closestCF = cf
-            closestName = name
+            if dist < shortestDistance and dist > 50 then
+                shortestDistance = dist
+                closestCF = cf
+                closestName = name
+            end
         end
+    end
+
+    if not foundAny then
+        table.clear(VisitedZones)
+        return GetNearestZone()
     end
 
     return closestName, closestCF, shortestDistance
@@ -331,254 +460,300 @@ local function HasGamepass(player, gamepassId)
     return success and result
 end
 
+local isTrucking = false
+local TruckLoopThread = nil
+
+local function SafeDisconnect(conn)
+    if conn then
+        if type(conn) == "thread" then task.cancel(conn)
+        else conn:Disconnect() end
+    end
+    return nil
+end
+
 local function StopTrucking()
+    isTrucking = false
+    
     if TruckLoopThread then
         task.cancel(TruckLoopThread)
         TruckLoopThread = nil
     end
-    if AntiflingConn then
-        AntiflingConn:Disconnect()
-        AntiflingConn = nil
-    end
-    if lastConn then
-        lastConn:Disconnect()
-        lastConn = nil
-    end
+
+    AntiflingConn = SafeDisconnect(AntiflingConn)
+    lastConn = SafeDisconnect(lastConn)
+    
     ToDo = "Idle"
+    
     if holding then
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
         holding = false
     end
-    if player.PlayerGui:FindFirstChild("TripDetails") then
-        local cancel = player.PlayerGui:WaitForChild("details"):WaitForChild("interaction"):FindFirstChild("cancel")
-        if cancel then
-            CleverClick(cancel, false)
-        end
+
+    local tripDetails = player.PlayerGui:FindFirstChild("TripDetails")
+    if tripDetails then
+        local cancel = player.PlayerGui.details.interaction:FindFirstChild("cancel")
+        if cancel then CleverClick(cancel, false) end
     end
+
+    table.clear(VisitedZones)
+
+    player.CameraMinZoomDistance = min
+    player.CameraMaxZoomDistance = max
 end
 
 local function StartTrucking()
+    local already = false
+    StopTrucking()
+    task.wait(0.1)
+    isTrucking = true
+    local cameraPos = root.Position + Vector3.new(0, 10, 0)
+    local tween = TweenService:Create(Camera, TweenInfo.new(0.35, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {CFrame = CFrame.lookAt(cameraPos, root.Position)})
+    tween:Play()
+    player.CameraMinZoomDistance = 9
+    player.CameraMaxZoomDistance = 10
+
     TruckLoopThread = task.spawn(function()
-        while true do 
-            task.wait()
+        while isTrucking and T_TJob do 
+            task.wait(0.1)
 
-                if lastConn then
-                    lastConn:Disconnect()
-                    lastConn = nil
+            char = player.Character
+            humanoid = char and char:FindFirstChildOfClass("Humanoid")
+            root = char and char:FindFirstChild("HumanoidRootPart")
+
+            local respawngui = player.PlayerGui:FindFirstChild("RespawnGUI")
+            if respawngui then
+                local btn = respawngui:FindFirstChild("button", true)
+                if btn then
+                    CleverClick(btn, false)
+                    task.wait(0.5)
+                    continue
                 end
+            end
 
-                if humanoid.Health == 0 then
-                    local respawngui = player.PlayerGui:FindFirstChild("RespawnGUI")
-                    if respawngui then
-                        local respawn = respawngui:FindFirstChild("respawn"):FindFirstChild("button")
-                        if respawn then
-                            CleverClick(respawn, false)
-                        end
-                    end
-                end
+            if not (char and humanoid and root and humanoid.Health > 0) then 
+                continue 
+            end
 
-                if not char or not char.Parent then continue end
-                if not humanoid or humanoid.Health <= 0 then continue end
-                if not root then continue end
-
-                local cameraPos = root.Position + Vector3.new(0, 100, 0)
-                Camera.CFrame = CFrame.lookAt(cameraPos, root.Position)
-        
-                local name, cf, dist = GetNearestZone()
-                
+            if ToDo == "Idle" then
+                local name, cf = GetNearestZone()
                 if cf then
-                    J_TruckCF = cf
+                    table.insert(VisitedZones, name)
+                    ToDo = "MovingToZone"
+                    local cameraPos = root.Position + Vector3.new(0, 10, 0)
+                    local tween = TweenService:Create(Camera, TweenInfo.new(0.15, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {CFrame = CFrame.lookAt(cameraPos, root.Position)})
+                    tween:Play()
+                    task.wait(0.5)
+                    Linear(root, cf, 550, function()
+                        if not isTrucking then return end
+                        root.CFrame = cf
+                        task.wait(0.5)
+                        ToDo = "GettingTask"
+                    end)
                 end
-        
-                if ToDo == "Idle" then
-                    local cf = J_TruckCF
-                    if cf then
-                        ToDo = "MovingToZone"
-                        Linear(root, cf, 550, function()
-                            root.CFrame = cf
+
+            elseif ToDo == "GettingTask" then
+                if player.PlayerGui:FindFirstChild("TripDetails") then
+                    ToDo = "WaitingForCar"
+                    continue
+                end
+            
+                local prompt = GetTruckJobPrompt()
+                if not prompt then 
+                    ToDo = "Idle" 
+                    continue 
+                end
+            
+                local startTime = tick()
+
+                repeat
+                    fireProximityPromptSafe(prompt)
+                    warn(prompt:GetFullName())
+                    task.wait(0.2)
+                until player.PlayerGui:FindFirstChild("TruckingOffers") or (tick() - startTime > 5)
+            
+                if not player.PlayerGui:FindFirstChild("TruckingOffers") then
+                    ToDo = "Idle"
+                    continue
+                end
+            
+                task.wait(1)
+            
+                local offers = player.PlayerGui:FindFirstChild("TruckingOffers")
+                if offers then
+                    local best = GetBestOfferTruck()
+                    if best then
+            
+                        local startSelect = tick()
+                        repeat
+                            CleverClick(best)
+                            warn(best:GetFullName())
+                            task.wait(0.2)
+                        until player.PlayerGui:FindFirstChild("TripDetails") or (tick() - startSelect > 5)
+            
+                        if player.PlayerGui:FindFirstChild("TripDetails") then
+                            ToDo = "WaitingForCar"
+                        else
+                            ToDo = "Idle"
+                        end
+            
+                    else
+                        ToDo = "Idle"
+                    end
+                else
+                    ToDo = "Idle"
+                    continue
+                end
+
+            elseif ToDo == "WaitingForCar" then
+                local car = workspace.player_related.cars:FindFirstChild(player.UserId)
+                if car and not humanoid.Sit then
+                    warn(car:GetFullName())
+                    local seat = car:FindFirstChild("driver", true)
+                    if seat then
+                        Linear(root, seat.CFrame * CFrame.new(0, 0, 0), 550, function()
                             root.Velocity = Vector3.zero
-                            task.wait(0.5)
-                            ToDo = "GettingTask"
+                            root.RotVelocity = Vector3.zero
+                            root.CFrame = seat.CFrame
                         end)
                     end
                 end
-        
-                if ToDo == "GettingTask" then
-                    local prompt = GetTruckJobPrompt()
 
-                    if not prompt then
-                        ToDo = "Idle"
-                    end
-        
-                    if prompt and not player.PlayerGui:FindFirstChild("TruckingOffers") then
-                        repeat
-                        fireProximityPromptSafe(prompt)
-                        warn(prompt:GetFullName())
-                        task.wait()
-                        until player.PlayerGui:FindFirstChild("TruckingOffers")
-                        task.wait(1)
-        
-                        local best = GetBestOfferTruck()
-                        if best and player.PlayerGui:FindFirstChild("TruckingOffers") and not player.PlayerGui:FindFirstChild("TripDetails") then
-                            repeat
-                            CleverClick(best)
-                            task.wait(0.25)
-                            until player.PlayerGui:FindFirstChild("TripDetails")
-                            ToDo = "WaitingForCar"
-                        end
+                if humanoid.Sit then
+                    task.wait(0.25)
+                    ToDo = "TeleportUp"
+                end
+
+            elseif ToDo == "TeleportUp" then
+                local car = workspace.player_related.cars:FindFirstChild(player.UserId)
+                local primary = car and (car.PrimaryPart or car:FindFirstChildWhichIsA("BasePart"))
+                
+                if primary and humanoid.Sit then
+                    task.wait(0.25)
+                    primary.Velocity = Vector3.zero
+                    primary.RotVelocity = Vector3.zero
+                    primary.CFrame = primary.CFrame * CFrame.new(0, 525, 0)
+                    task.wait(0.25)
+                    ToDo = "GoingToTarget"
+                    if not already then
+                        already = true
+                        local cameraPos = root.Position + Vector3.new(0, 15, 0)
+                        local tween = TweenService:Create(Camera, TweenInfo.new(0.15, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {CFrame = CFrame.lookAt(cameraPos, root.Position)})
+                        tween:Play()
+                        player.CameraMinZoomDistance = 14
+                        player.CameraMaxZoomDistance = 15
                     end
                 end
-        
-                if ToDo == "WaitingForCar" then
-                    local car = workspace.player_related.cars:FindFirstChild(player.UserId)
-        
-                    if car and not humanoid.Sit then
-                        local seat = car:FindFirstChild("seats") and car.seats:FindFirstChild("driver")
-                        if seat then
-                            Linear(root, seat, 550)
-                        end
-                    end
-        
-                    if humanoid.Sit then
-                        task.wait(0.25)
-                        ToDo = "TeleportUp"
-                    end
-                end
-        
-                if ToDo == "TeleportUp" then
-                    local car = workspace.player_related.cars:FindFirstChild(player.UserId)
-                    local primary = car and (car.PrimaryPart or car:FindFirstChildWhichIsA("BasePart"))
-        
-                    if primary then
-                        primary.CFrame = primary.CFrame * CFrame.new(0, 525, 0)
-                        task.wait(0.2)
-                        ToDo = "GoingToTarget"
-                    end
-                end
-        
-                if ToDo == "GoingToTarget" then
-                    local target = GetTrailerBox()
-                    local car = workspace.player_related.cars:FindFirstChild(player.UserId)
-                    local primary = car and (car.PrimaryPart or car:FindFirstChildWhichIsA("BasePart"))
-        
-                    if target and primary then
-                        ToDo = "Driving"
-                        if driving then continue end
-                        driving = true
-                        task.spawn(function()
-                            AntiflingConn = RunService.Heartbeat:Connect(function()
-                                car:WaitForChild("_trailer").PrimaryPart.CFrame = primary.CFrame
-                                car:WaitForChild("_trailer").PrimaryPart.Velocity = Vector3.zero
-        
+
+            elseif ToDo == "GoingToTarget" then
+                local target = GetTrailerBox()
+                local car = workspace.player_related.cars:FindFirstChild(player.UserId)
+                local primary = car and (car.PrimaryPart or car:FindFirstChildWhichIsA("BasePart"))
+
+                if target and primary then
+                    ToDo = "Driving"
+
+                    task.spawn(function()
+                        lastConn = RunService.Heartbeat:Connect(function()
+                            if not isTrucking or ToDo ~= "Driving" then return end
+                            local trailer = car:FindFirstChild("_trailer")
+                            if trailer and trailer.PrimaryPart then
+                                trailer.PrimaryPart.Velocity = Vector3.zero
+                                trailer.PrimaryPart.RotVelocity = Vector3.zero
+                                trailer.PrimaryPart.CFrame = primary.CFrame
+    
                                 task.spawn(function()
-                                    for _, v in ipairs(car:WaitForChild("wheels"):GetChildren()) do
+                                local wheels = car:FindFirstChild("wheels")
+                                if not wheels then return end
+                                    for _, v in ipairs(wheels:GetChildren()) do
                                         if v:IsA("Model") then
                                             if v.PrimaryPart then
-                                                v.PrimaryPart.CFrame = primary.CFrame
                                                 v.PrimaryPart.Velocity = Vector3.zero
+                                                v.PrimaryPart.RotVelocity = Vector3.zero
+                                                v.PrimaryPart.CFrame = primary.CFrame
                                             end
                                         end
                                     end
                                 end)
-                            end)
-                        end)
-                        Linear(primary, target.CFrame * CFrame.new(0, 525, 0), 90, function()
-                            Linear(primary, target.CFrame * CFrame.new(0, 0, 0), 550, function()
-                            if AntiflingConn then
-                            AntiflingConn:Disconnect()
-                            AntiflingConn = nil
                             end
-                            end)
+                        end)
+                    end)
 
-                            car:WaitForChild("_trailer").PrimaryPart.CFrame = primary.CFrame
-                            car:WaitForChild("_trailer").PrimaryPart.Velocity = Vector3.zero
-
-                            task.spawn(function()
-                                for _, v in ipairs(car:WaitForChild("wheels"):GetChildren()) do
-                                    if v:IsA("Model") then
-                                        if v.PrimaryPart then
-                                            v.PrimaryPart.CFrame = primary.CFrame
-                                            v.PrimaryPart.Velocity = Vector3.zero
-                                        end
-                                    end
-                                end
-                            end)
-
-                            driving = false
+                    Linear(primary, target * CFrame.new(0, 525, 0), 90, function()
+                        if not isTrucking then return end
+                        Linear(primary, target, 550, function()
                             Last = target
                             ToDo = "Finishing"
                         end)
-                    end
+                    end)
                 end
-        
-                if ToDo == "Finishing" then
-                    local promptGui = player.PlayerGui:FindFirstChild("prompt")
-                    local car = workspace.player_related.cars:FindFirstChild(player.UserId)
-                    local primary = car and (car.PrimaryPart or car:FindFirstChildWhichIsA("BasePart"))
-        
-                    if promptGui then
-                        task.spawn(function()
-                            if not lastConn then
-                            lastConn = RunService.Heartbeat:Connect(function()
-                                if not car.Parent or not primary.Parent then 
-                                    if lastConn then lastConn:Disconnect() end
-                                    return 
-                                end
-                                
-                                if not Last then return end
-                                primary.Velocity = Vector3.zero
-                                Linear(primary, Last.CFrame * CFrame.new(0, 0, 0), 550, function ()
-                                    primary.Velocity = Vector3.zero
-                                    primary.CFrame = Last.CFrame * CFrame.new(0, 0, 0)
-                                end)
-                                
-                                local trailer = car:FindFirstChild("_trailer")
-                                if trailer and trailer.PrimaryPart then
-                                    trailer.PrimaryPart.Velocity = Vector3.zero
-                                    trailer.PrimaryPart.CFrame = primary.CFrame * CFrame.new(0,-4, -5)
-                                end
-                            end)
-                        end
-                        end)
-        
-                        local key = promptGui:WaitForChild("main"):FindFirstChild("keybind")
-                        if key then
-                            if VirtualInputManager and not holding then
-                                holding = true
-                                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
-                                task.wait(2)
-                                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
-                                holding = false
-                            end
-                        end
-                    end
-        
-                    if not workspace.player_related.cars:FindFirstChild(player.UserId) then
-                        ToDo = "Idle"
-                        if lastConn then
-                            lastConn:Disconnect()
-                            lastConn = nil
+
+            elseif ToDo == "Finishing" then
+                local car = workspace.player_related.cars:FindFirstChild(player.UserId)
+                local primary = car and (car.PrimaryPart or car:FindFirstChildWhichIsA("BasePart"))
+                if not car then
+                    table.clear(VisitedZones)
+                    SafeDisconnect(lastConn)
+                    SafeDisconnect(agaConn)
+                    ToDo = "Idle"
+                    already = false
+                    continue
+                end
+
+                task.spawn(function()
+                    agaConn = RunService.Heartbeat:Connect(function()
+                        if not isTrucking or ToDo ~= "Finishing" or not Last then return end
+
+                        if primary then
+                            primary.Velocity = Vector3.zero
+                            primary.RotVelocity = Vector3.zero
+                            primary.CFrame = Last * CFrame.new(0, 0, 0)
                         end
 
-                        if AntiflingConn then
-                            AntiflingConn:Disconnect()
-                            AntiflingConn = nil
+                        local trailer = car:FindFirstChild("_trailer")
+                        if trailer and trailer.PrimaryPart then
+                            trailer.PrimaryPart.Velocity = Vector3.zero
+                            trailer.PrimaryPart.RotVelocity = Vector3.zero
+                            trailer.PrimaryPart.CFrame = primary.CFrame * CFrame.new(0,-4, -5)
                         end
-                    end
+
+                        task.spawn(function()
+                            local wheels = car:FindFirstChild("wheels")
+                            if not wheels then return end
+                            for _, v in ipairs(wheels:GetChildren()) do
+                                if v:IsA("Model") then
+                                    if v.PrimaryPart then
+                                        v.PrimaryPart.Velocity = Vector3.zero
+                                        v.PrimaryPart.RotVelocity = Vector3.zero
+                                        v.PrimaryPart.CFrame = primary.CFrame
+                                    end
+                                end
+                            end
+                        end)
+                    end)
+                end)
+
+                local promptGui = player.PlayerGui:FindFirstChild("prompt")
+                if promptGui then warn(promptGui:GetFullName()) end
+                if promptGui and not holding then
+                    holding = true
+                    task.spawn(function()
+                        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+                        task.wait(2.5)
+                        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+                        holding = false
+                    end)
                 end
-            if not T_TJob then 
-                break 
             end
         end
     end)
 end
 
 local function getWindTier(winds)
-    if winds <= 85 then return 0
-    elseif winds <= 110 then return 1
-    elseif winds <= 130 then return 2
-    elseif winds <= 150 then return 3
-    elseif winds <= 175 then return 4
+    if winds <= 35 then return 0
+    elseif winds <= 80 then return 1
+    elseif winds <= 100 then return 2
+    elseif winds <= 120 then return 3
+    elseif winds <= 140 then return 4
     else return 5 end
 end
 
@@ -658,6 +833,10 @@ local Tabs = {
         Title = "Tab Main",
         Icon = "house"
     },
+    Setting = Window:CreateTab{
+        Title = "Tab Settings",
+        Icon = "settings"
+    },
     Jpass = Window:CreateTab{
         Title = "Tab Jobs",
         Icon = "hard-hat"
@@ -704,6 +883,21 @@ local function createStormUI(storm)
     StormUI[storm] = paragraph
 end
 
+local function createPlayerUI(plr)
+    if not selectedPlayer then return end
+    if PlayerUI[player] then return end 
+
+    local playerParagraph = Tabs.Players:CreateParagraph(plr.Name, {
+        Title = "Status: " .. plr.Name,
+        Content = "Loading...",
+        TitleAlignment = "Middle",
+        ContentAlignment = Enum.TextXAlignment.Center
+    })
+
+    PlayerUI[plr.Name] = playerParagraph
+    warn("Instance For: " .. plr.Name)
+end
+
 local strom = Tabs.Main:CreateDropdown("strom", {
     Title = "Select Storm",
     Values = StormList(),
@@ -745,32 +939,10 @@ task.spawn(function()
     end
 end)
 
-local Dis = Tabs.Main:CreateSlider("DISTANCE", {
-    Title = "Tornado Distance",
-    Default = 10,
-    Min = 1,
-    Max = 100,
-    Rounding = 0,
-    Callback = function(Value)
-        DDD = Value
-    end
-})
-
-local HEI = Tabs.Main:CreateSlider("HEIGGT", {
-    Title = "Tornado Height",
-    Default = 35,
-    Min = 1,
-    Max = 110,
-    Rounding = 0,
-    Callback = function(Value)
-        YYY = Value
-    end
-})
-
 local TPEnabled = false
 local TP2Enabled = false
 
-local TP = Tabs.Main:CreateToggle("TpSS", {Title = "Toggle teleport to selected storm", Default = false })
+local TP = Tabs.Main:CreateToggle("TpSS", {Title = "Toggle Teleport To Selected Storm", Default = false })
 
 TP:OnChanged(function(bool)
     TPEnabled = bool
@@ -798,7 +970,7 @@ TP:OnChanged(function(bool)
     end
 end)
 
-local TP2 = Tabs.Main:CreateToggle("TpS", {Title = "Toggle teleport to selected storm's tornado", Default = false })
+local TP2 = Tabs.Main:CreateToggle("TpS", {Title = "Toggle Teleport To Seleted Storm's Tornado", Default = false })
 
 TP2:OnChanged(function(bool)
 
@@ -830,7 +1002,7 @@ end)
 local probe = false
 local currentProbe = nil
 
-local probee = Tabs.Main:CreateToggle("Probe", {Title = "Toggle auto collect probes", Default = false })
+local probee = Tabs.Main:CreateToggle("Probe", {Title = "Toggle Auto Collect Probes", Default = false })
 
 probee:OnChanged(function(bool)
     probe = bool
@@ -890,7 +1062,36 @@ probee:OnChanged(function(bool)
     end
 end)
 
-local Truck = Tabs.Jpass:CreateToggle("truck", {Title = "Toggle auto truck job", Default = false })
+
+local rj = Tabs.Setting:CreateToggle("Rejoin", {Title = "Toggle Auto Rejoin", Default = true })
+
+rj:OnChanged(function(bool)
+    AutoRj = bool
+end)
+
+local Dis = Tabs.Setting:CreateSlider("DISTANCE", {
+    Title = "Tornado Distance",
+    Default = 10,
+    Min = 1,
+    Max = 100,
+    Rounding = 0,
+    Callback = function(Value)
+        DDD = Value
+    end
+})
+
+local HEI = Tabs.Setting:CreateSlider("HEIGGT", {
+    Title = "Tornado Height",
+    Default = 35,
+    Min = 1,
+    Max = 110,
+    Rounding = 0,
+    Callback = function(Value)
+        YYY = Value
+    end
+})
+
+local Truck = Tabs.Jpass:CreateToggle("truck", {Title = "Toggle Auto Truck Job", Default = false })
 
 Truck:OnChanged(function(bool)
 
@@ -913,6 +1114,76 @@ Truck:OnChanged(function(bool)
     end
 end)
 
+local NWS = Tabs.Jpass:CreateToggle("NWSJOB", {Title = "Toggle Auto NWS Job", Default = false })
+
+NWS:OnChanged(function(bool)
+
+    T_NWSJob = bool
+
+    if HasGamepass(player, 64045636) then
+        T_NWSJob = bool
+        Library:Notify{
+            Title = "Info [ Script ]",
+            Content = "This feature is comming soon.",
+            Duration = 5
+        }
+    else
+        Library:Notify{
+            Title = "Info [ Script ]",
+            Content = "You might not have this gamepass yet, Please buy and try again later.",
+            Duration = 7
+        }
+    end
+
+    if not bool and HasGamepass(player, 64045636) then
+        warn("test")
+    end
+end)
+
+local EMER = Tabs.Jpass:CreateToggle("EMERJOB", {Title = "Toggle Auto Emergency Job", Default = false })
+
+EMER:OnChanged(function(bool)
+
+    T_EMERJOB = bool
+
+    if HasGamepass(player, 26749224) then
+        T_EMERJOB = bool
+        Library:Notify{
+            Title = "Info [ Script ]",
+            Content = "This feature is never come, LOL.",
+            Duration = 5
+        }
+    else
+        Library:Notify{
+            Title = "Info [ Script ]",
+            Content = "You might not have this gamepass yet, Please buy and try again later.",
+            Duration = 7
+        }
+    end
+
+    if not bool and HasGamepass(player, 26749224) then
+        warn("test")
+    end
+end)
+
+local STORMM = Tabs.Jpass:CreateToggle("STORMMJOB", {Title = "Toggle Auto Storm Chaser Job", Default = false })
+
+STORMM:OnChanged(function(bool)
+
+    T_SCHASERJob = bool
+
+    if bool then
+        T_SCHASERJob = bool
+        Library:Notify{
+            Title = "Info [ Script ]",
+            Content = "This feature is comming soon.",
+            Duration = 5
+        }
+    else
+        warn("test")
+    end
+end)
+
 local Place = Tabs.Travel:CreateDropdown("location", {
     Title = "Select Location",
     Values = PlacesList(),
@@ -925,33 +1196,40 @@ Place:OnChanged(function(Value)
 end)
 
 local Travee = false
+local Traveling = false
 
-local tra = Tabs.Travel:CreateToggle("tra", {Title = "Toggle Travel to selected place", Default = false })
+local tra = Tabs.Travel:CreateToggle("tra", {Title = "Toggle Travel To Selected Place", Default = false })
 
 tra:OnChanged(function(bool)
    Travee = bool
 
     if bool then
         task.spawn(function()
-            while true do task.wait()
+            while true do task.wait(0.3)
                 if not Travee or not PlaceToTween then
                     Options.tra:SetValue(false)
                     return
                 end
 
                 local AreaPart = workspace:WaitForChild("map_related"):WaitForChild("areas"):FindFirstChild(PlaceToTween)
-                if AreaPart and root then
-                    Linear(root, AreaPart.CFrame * CFrame.new(0, 5, 0), 550)
+
+                if AreaPart and root and not Traveling then
+                    Traveling = true
+                    Linear(root, AreaPart.Position + Vector3.new(0, 5, 0), 550, function()
+                        root.AssemblyLinearVelocity = Vector3.zero
+                        Traveling = false
+                    end)
                 end
             end
         end)
     else
+        Traveling = false
         CancelLinear()
     end
 end)
 
 local Target = Tabs.Players:AddDropdown("TargetPlayer", {
-    Title = "Select player",
+    Title = "Select Player",
     Values = plrList(),
     Multi = false,
     Default = "None",
@@ -960,22 +1238,25 @@ local Target = Tabs.Players:AddDropdown("TargetPlayer", {
 Target:OnChanged(function(Value)
     selectedPlayer = Value
     
-    if selectedPlayer and game:GetService("Players"):FindFirstChild(selectedPlayer)  then
-    local Highlight = Instance.new("Highlight")
-    Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    Highlight.FillColor = Color3.fromRGB(255, 255, 0)
-    Highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
-    Highlight.Parent = game:GetService("Players"):FindFirstChild(selectedPlayer)
-    Highlight.Adornee = game:GetService("Players"):FindFirstChild(selectedPlayer)
+    for name, paragraph in pairs(PlayerUI) do
+        paragraph:Destroy()
+        PlayerUI[name] = nil
+    end
 
-    local tween = game:GetService("TweenService"):Create(Highlight, TweenInfo.new(0.725, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {FillTransparency = 1, OutlineTransparency = 1})
-    tween:Play()
+    local targetPlr = game:GetService("Players"):FindFirstChild(selectedPlayer)
     
-    tween.Completed:Connect(function()
-        if Highlight and Highlight.Parent then
-            Highlight:Destroy()
-        end
-    end)
+    if targetPlr then
+        createPlayerUI(targetPlr)
+
+        local Highlight = Instance.new("Highlight")
+        Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        Highlight.FillColor = Color3.fromRGB(255, 255, 0)
+        Highlight.Parent = targetPlr.Character or targetPlr.CharacterAdded:Wait()
+        Highlight.Adornee = Highlight.Parent
+
+        local tween = game:GetService("TweenService"):Create(Highlight, TweenInfo.new(0.725, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {FillTransparency = 1, OutlineTransparency = 1})
+        tween:Play()
+        tween.Completed:Connect(function() Highlight:Destroy() end)
     end
 end)
 
@@ -993,7 +1274,7 @@ end)
 
 local TPing = false
 
-local TPP = Tabs.Players:CreateToggle("Tpp", {Title = "Toggle teleport to selected player", Default = false })
+local TPP = Tabs.Players:CreateToggle("Tpp", {Title = "Toggle Teleport To Selected Player", Default = false })
 
 TPP:OnChanged(function(bool)
    TPing = bool
@@ -1023,7 +1304,7 @@ end)
 
 local Viewing = false
 
-local VV = Tabs.Players:CreateToggle("VVV", {Title = "Toggle Spectate selected player", Default = false })
+local VV = Tabs.Players:CreateToggle("VVV", {Title = "Toggle Spectate Selected Player", Default = false })
 
 VV:OnChanged(function(bool)
    Viewing = bool
@@ -1258,6 +1539,51 @@ Tabs.Misc:AddButton({
 })
 
 Tabs.Misc:AddButton({
+    Title = "Run Low Graphics Mode",
+    Callback = function()
+        Window:Dialog({
+            Title = "Warning",
+            Content = "Run low graphics?",
+            Buttons = {
+                {
+                    Title = "Continue",
+                    Callback = function()
+                        if lowGraphicsEnabled then
+                            Window:Dialog({
+                                Title = "Warning",
+                                Content = "Low Graphics Mode has already been applied. Running it again may reduce FPS instead of boosting it. Continue?",
+                                Buttons = {
+                                    {
+                                        Title = "Continue",
+                                        Callback = function()
+                                            RunLowGraphics()
+                                        end
+                                    },
+                                    {
+                                        Title = "Cancel",
+                                        Callback = function()
+                                            warn("User canceled")
+                                        end
+                                    }
+                                }
+                            })
+                        else
+                            RunLowGraphics()
+                        end
+                    end
+                },
+                {
+                    Title = "Cancel",
+                    Callback = function()
+                        warn("User canceled")
+                    end
+                }
+            }
+        })
+    end
+})
+
+Tabs.Misc:AddButton({
         Title = "Copy JobId",
         Callback = function()
         setclipboard(game.JobId)
@@ -1343,7 +1669,7 @@ local norenderCo = "White"
 
 local NORENCO = Tabs.Misc:CreateDropdown("mode", {
     Title = "Disable Render Color",
-    Values = {"White", "Black [ Kick ]"},
+    Values = {"White", "Black"},
     Multi = false,
     Default = 2,
 })
@@ -1358,10 +1684,30 @@ local norender = Tabs.Misc:CreateToggle("RENDER", {Title = "Toggle Render", Defa
 
 norender:OnChanged(function(bool)
     if bool then
-        RunService:Set3dRenderingEnabled(false)
-        if gui then
-            gui:Destroy()
-            gui = nil
+        if norenderCo == "White" then
+            RunService:Set3dRenderingEnabled(false)
+            if gui then
+                gui:Destroy()
+                gui = nil
+            end
+        elseif norenderCo == "Black" then
+            RunService:Set3dRenderingEnabled(false)
+
+            if not gui and gethui() then
+            gui = Instance.new("ScreenGui")
+            gui.Name = "BlackScreen"
+            gui.IgnoreGuiInset = true
+            gui.ResetOnSpawn = false
+            gui.DisplayOrder = -1
+            gui.Parent = gethui()
+
+            local frame = Instance.new("Frame")
+            frame.Size = UDim2.new(1, 0, 1, 0)
+            frame.Position = UDim2.new(0, 0, 0, 0)
+            frame.BackgroundColor3 = Color3.new(0, 0, 0)
+            frame.BorderSizePixel = 0
+            frame.Parent = gui
+            end
         end
     else
         RunService:Set3dRenderingEnabled(true)
@@ -1388,42 +1734,93 @@ stormsFolder.ChildRemoved:Connect(function(storm)
 end)
 
 task.spawn(function()
-RunService.RenderStepped:Connect(function()
-    for storm, ui in pairs(StormUI) do
-        if storm and storm.Parent then
-            local data = {}
+    while true do
+        task.wait(0.3)
 
-            local dist
-            local TornadoPart = storm.rotation:FindFirstChild("TornadoPart")
+        for storm, ui in pairs(StormUI) do
+            if storm and storm.Parent then
+                local data = {}
 
-            if TornadoPart then
-                dist = (TornadoPart.Position - root.Position).Magnitude
+                local dist
+                local TornadoPart = storm.rotation:FindFirstChild("TornadoPart")
+
+                if TornadoPart then
+                    dist = (TornadoPart.Position - root.Position).Magnitude
+                end
+
+                data[1] = "Storm Wind Speed: " .. string.format("%.1f", storm.configs.winds.Value) .. " Mph"
+                data[2] = "Storm Moving Speed: " .. string.format("%.1f", storm.configs.motion:GetAttribute("speed")) .. " Mph"
+                data[3] = "Rainwrap: " .. string.format("%.3f", storm.configs.rainwrap.Value)
+                data[4] = "Hail: " .. string.format("%.2f", storm.configs.hail.Value)
+
+                if storm.rotation:FindFirstChild("TornadoPart") or storm.rotation:FindFirstChild("tornado_scan") then
+                    data[5] = "Have Tornado: 🟢"
+                    data[6] = "Tornado Wind Speed: " .. string.format("%.1f", storm.configs.tornado.winds.Value) .. " Mph"
+                    data[7] = "Tornado Base Size: " .. string.format("%.1f", storm.configs.tornado.width:GetAttribute("base"))
+                    data[8] = "Tornado Height: " .. string.format("%.1f", storm.configs.tornado.height.Value)
+                    data[9] = "Tornado Growth Speed: " .. string.format("%.2f", storm.configs.tornado.width:GetAttribute("growth_spd"))
+                    data[10] = "Tornado Wind Field: " .. string.format("%.3f", storm.configs.tornado.windfield.Value)
+                    data[11] = "Tornado SFC Width: " .. string.format("%.1f", storm.configs.tornado.width:GetAttribute("sfc"))
+                    data[12] = "Distance Tornado Between Player: " .. string.format("%.1f", dist or 0)
+                    data[13] = "Tornado EF: " .. getWindTier(storm.configs.tornado.winds.Value)
+                else
+                    data[5] = "Have Tornado: 🔴"
+                    data[6] = "nil"
+                end
+
+                ui:SetValue(table.concat(data, "\n"))
             end
-
-            data[1] = "Storm Wind Speed: " .. string.format("%.1f", storm.configs.winds.Value) .. " Mph"
-            data[2] = "Storm Moving Speed: " .. string.format("%.1f", storm.configs.motion:GetAttribute("speed")) .. " Mph"
-            data[3] = "Rainwrap: " .. string.format("%.3f", storm.configs.rainwrap.Value)
-            data[4] = "Hail: " .. string.format("%.2f", storm.configs.hail.Value)
-
-            if storm.rotation:FindFirstChild("TornadoPart") or storm.rotation:FindFirstChild("tornado_scan") then
-                data[5] = "Have Tornado: 🟢"
-                data[6] = "Tornado Wind Speed: " .. string.format("%.1f", storm.configs.tornado.winds.Value) .. " Mph"
-                data[7] = "Tornado Base Size: " .. string.format("%.1f", storm.configs.tornado.width:GetAttribute("base"))
-                data[8] = "Tornado Height: " .. string.format("%.1f", storm.configs.tornado.height.Value)
-                data[9] = "Tornado Growth Speed: " .. string.format("%.2f", storm.configs.tornado.width:GetAttribute("growth_spd"))
-                data[10] = "Tornado Wind Field: " .. string.format("%.3f", storm.configs.tornado.windfield.Value)
-                data[11] = "Tornado SFC Width: " .. string.format("%.1f", storm.configs.tornado.width:GetAttribute("sfc"))
-                data[12] = "Distance Tornado Between Player: " .. string.format("%.1f", dist)
-                data[13] = "Tornado EF: " .. getWindTier(storm.configs.tornado.winds.Value)
-            else
-                data[5] = "Have Tornado: 🔴"
-                data[6] = "nil"
-            end
-
-            ui:SetValue(table.concat(data, "\n"))
         end
     end
 end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.3)
+        if selectedPlayer then
+            local targetPlr = game.Players:FindFirstChild(selectedPlayer)
+            local ui = PlayerUI[selectedPlayer]
+            
+            if targetPlr and ui then
+                local char = targetPlr.Character
+                local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+                local hum = char and char:FindFirstChild("Humanoid")
+                
+                local carCount = 0
+                local carNamesList = "None"
+                
+                local inv = targetPlr:FindFirstChild("player_inv")
+                if inv then
+                    local cars = inv:GetChildren() 
+                    carCount = #cars
+                    
+                    if carCount > 0 then
+                        local namesTable = {}
+                        for _, carFolder in ipairs(cars) do
+                            local realName = carFolder:GetAttribute("vehicle_name") or carFolder.Name
+                            table.insert(namesTable, "🚗 " .. realName)
+                        end
+                        carNamesList = table.concat(namesTable, "\n")
+                    end
+                else
+                    carNamesList = "Searching for player_inv..."
+                end
+                
+                local pData = {
+                    "- [ Player Status ] -",
+                    "-Status: " .. (hum and (hum.Health > 0 and "Alive" or "Dead") or "Unknown"),
+                    "-Health: " .. (hum and math.floor(hum.Health) or "0") .. "/" .. (hum and math.floor(hum.MaxHealth) or "0"),
+                    "-Distance: " .. (rootPart and root and string.format("%.1f", (rootPart.Position - root.Position).Magnitude) or "0") .. " studs",
+                    "",
+                    "- [ Car Inventory ] -",
+                    "Total Cars: " .. carCount,
+                    carNamesList
+                }
+                
+                ui:SetValue(table.concat(pData, "\n"))
+            end
+        end
+    end
 end)
 
 Window:SelectTab(1)
